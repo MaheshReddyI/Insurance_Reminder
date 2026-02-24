@@ -1,0 +1,36 @@
+@import "tailwindcss";
+
+@theme {
+  --color-charcoal: #121212;
+  --color-charcoal-light: #1e1e1e;
+  --color-emerald-neon: #10b981;
+  --color-amber-neon: #f59e0b;
+  --color-blue-neon: #00d2ff;
+  --color-gold-neon: #ffd700;
+}
+
+@layer base {
+  body {
+    @apply bg-charcoal text-white antialiased;
+  }
+}
+
+@layer components {
+  .glass {
+    @apply bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl;
+  }
+  
+  .glass-hover {
+    @apply hover:bg-white/10 transition-all duration-300;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 4px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-track {
+    @apply bg-white/5 rounded-full;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    @apply bg-white/10 rounded-full hover:bg-white/20 transition-colors;
+  }
+}
