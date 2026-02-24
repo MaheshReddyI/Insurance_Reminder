@@ -58,37 +58,44 @@ db.exec(`
 app.use(express.json());
 
 // WhatsApp Reminder Logic
-async function sendWhatsAppMessage(phone: string, name: string, policyType: string, expiryDate: string) {
+async function sendWhatsAppMessage(phone: string, messageData: { type: "template", name: string, params: string[] } | { type: "text", body: string }) {
   const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
   const PHONE_NUMBER_ID = process.env.WHATSAPP_PHONE_NUMBER_ID;
 
   if (!WHATSAPP_TOKEN || !PHONE_NUMBER_ID) {
-    console.log(`[MOCK WHATSAPP] To: ${phone}, Msg: Hello ${name}, your ${policyType} policy expires on ${expiryDate}.`);
+    const msg = messageData.type === "template" 
+      ? `Template: ${messageData.name}, Params: ${messageData.params.join(", ")}`
+      : `Text: ${messageData.body}`;
+    console.log(`[MOCK WHATSAPP] To: ${phone}, Msg: ${msg}`);
     return { status: "mock_sent" };
   }
 
   try {
+    const payload: any = {
+      messaging_product: "whatsapp",
+      to: phone,
+    };
+
+    if (messageData.type === "template") {
+      payload.type = "template";
+      payload.template = {
+        name: messageData.name,
+        language: { code: "en_US" },
+        components: [
+          {
+            type: "body",
+            parameters: messageData.params.map(p => ({ type: "text", text: p })),
+          },
+        ],
+      };
+    } else {
+      payload.type = "text";
+      payload.text = { body: messageData.body };
+    }
+
     const response = await axios.post(
       `https://graph.facebook.com/v17.0/${PHONE_NUMBER_ID}/messages`,
-      {
-        messaging_product: "whatsapp",
-        to: phone,
-        type: "template",
-        template: {
-          name: "policy_expiry_reminder",
-          language: { code: "en_US" },
-          components: [
-            {
-              type: "body",
-              parameters: [
-                { type: "text", text: name },
-                { type: "text", text: policyType },
-                { type: "text", text: expiryDate },
-              ],
-            },
-          ],
-        },
-      },
+      payload,
       {
         headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` },
       }
@@ -284,8 +291,8 @@ apiRouter.post("/broadcast", async (req, res) => {
     const results = [];
     for (const customer of customers) {
       const personalizedMessage = messageTemplate.replace("{{1}}", customer.name);
-      console.log(`[BROADCAST] To: ${customer.phone}, Msg: ${personalizedMessage}`);
-      results.push({ phone: customer.phone, status: "sent" });
+      const outcome = await sendWhatsAppMessage(customer.phone, { type: "text", body: personalizedMessage });
+      results.push({ phone: customer.phone, status: outcome.status });
     }
 
     if (!isTest) {
@@ -302,8 +309,8 @@ apiRouter.post("/broadcast", async (req, res) => {
 
 apiRouter.post("/send-manual", async (req, res) => {
   const { phone, name, message } = req.body;
-  console.log(`[MANUAL] To: ${phone}, Msg: ${message}`);
-  res.json({ status: "sent" });
+  const outcome = await sendWhatsAppMessage(phone, { type: "text", body: message });
+  res.json({ status: outcome.status });
 });
 
 apiRouter.post("/trigger-reminders", async (req, res) => {
@@ -313,10 +320,14 @@ apiRouter.post("/trigger-reminders", async (req, res) => {
   try {
     for (const days of intervals) {
       const targetDate = format(addDays(new Date(), days), "yyyy-MM-dd");
-      const policies = db.prepare("SELECT p.*, c.name, c.phone FROM policies p JOIN customers c ON p.customer_id = c.id WHERE date(p.expiry_date) = ?").all() as any[];
+      const policies = db.prepare("SELECT p.*, c.name, c.phone FROM policies p JOIN customers c ON p.customer_id = c.id WHERE date(p.expiry_date) = ?").all(targetDate) as any[];
 
       for (const policy of policies) {
-        const outcome = await sendWhatsAppMessage(policy.phone, policy.name, policy.policy_type, policy.expiry_date);
+        const outcome = await sendWhatsAppMessage(policy.phone, { 
+          type: "template", 
+          name: "policy_expiry_reminder", 
+          params: [policy.name, policy.policy_type, policy.expiry_date] 
+        });
         db.prepare("INSERT INTO reminder_logs (policy_id, status, days_remaining) VALUES (?, ?, ?)").run(
           policy.id, outcome.status, days
         );
